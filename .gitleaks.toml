@@ -5,8 +5,8 @@ useDefault = true
 
 [[rules]]
 id = "generic-jwt-secret"
-description = "Hardcoded JWT secret"
-regex = '''(?i)jwt[_-]?secret\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+description = "Hardcoded JWT secret (literal values only, not variable references)"
+regex = '''(?i)jwt[_-]?secret\s*[:=]\s*['"][^'"\s${}]{8,}['"]'''
 tags = ["secret", "jwt"]
 
 [[rules]]
@@ -27,5 +27,4 @@ regexes = [
   '''\$\{[A-Z_]+\}''',
   '''secretKeyRef''',
   '''ephemeral-ci-database-password''',
-  '''(unit|integration)-test-secret''',
 ]

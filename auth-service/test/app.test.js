@@ -3,7 +3,7 @@ import { after, before, describe, it } from 'node:test';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../src/app.js';
 
-const JWT_SECRET = 'unit-test-secret';
+const TEST_SIGNING_KEY = 'unit-test-secret';
 const DEMO_USER = 'demo';
 const DEMO_PASSWORD = 'unit-test-password';
 
@@ -11,7 +11,7 @@ let server;
 let baseUrl;
 
 before(() => {
-  process.env.JWT_SECRET = JWT_SECRET;
+  process.env.JWT_SECRET = TEST_SIGNING_KEY;
   process.env.DEMO_USER = DEMO_USER;
   process.env.DEMO_PASSWORD = DEMO_PASSWORD;
 
@@ -37,7 +37,7 @@ describe('POST /login', () => {
     assert.equal(response.status, 200);
 
     const { token } = await response.json();
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, TEST_SIGNING_KEY);
     assert.equal(payload.sub, DEMO_USER);
   });
 

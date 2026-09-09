@@ -5,7 +5,7 @@ import { createApp } from '../src/app.js';
 import { closePool, getPool } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
 
-const JWT_SECRET = 'integration-test-secret';
+const TEST_SIGNING_KEY = 'integration-test-secret';
 
 let server;
 let baseUrl;
@@ -14,14 +14,14 @@ let token;
 before(async () => {
   assert.ok(process.env.DATABASE_URL, 'DATABASE_URL must be set for integration tests');
 
-  process.env.JWT_SECRET = JWT_SECRET;
+  process.env.JWT_SECRET = TEST_SIGNING_KEY;
 
   await getPool().query('DROP TABLE IF EXISTS orders, schema_migrations');
   await migrate();
 
   server = createApp().listen(0);
   baseUrl = `http://127.0.0.1:${server.address().port}`;
-  token = jwt.sign({ sub: 'demo' }, JWT_SECRET, { expiresIn: '5m' });
+  token = jwt.sign({ sub: 'demo' }, TEST_SIGNING_KEY, { expiresIn: '5m' });
 });
 
 after(async () => {

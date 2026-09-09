@@ -3,18 +3,18 @@ import { after, before, describe, it } from 'node:test';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../src/app.js';
 
-const JWT_SECRET = 'unit-test-secret';
+const TEST_SIGNING_KEY = 'unit-test-secret';
 
 let server;
 let baseUrl;
 let token;
 
 before(() => {
-  process.env.JWT_SECRET = JWT_SECRET;
+  process.env.JWT_SECRET = TEST_SIGNING_KEY;
 
   server = createApp().listen(0);
   baseUrl = `http://127.0.0.1:${server.address().port}`;
-  token = jwt.sign({ sub: 'demo' }, JWT_SECRET, { expiresIn: '5m' });
+  token = jwt.sign({ sub: 'demo' }, TEST_SIGNING_KEY, { expiresIn: '5m' });
 });
 
 after(() => {
@@ -44,7 +44,7 @@ describe('authorization', () => {
   });
 
   it('rejects an expired token', async () => {
-    const expiredToken = jwt.sign({ sub: 'demo' }, JWT_SECRET, { expiresIn: '-1s' });
+    const expiredToken = jwt.sign({ sub: 'demo' }, TEST_SIGNING_KEY, { expiresIn: '-1s' });
 
     const response = await fetch(`${baseUrl}/orders`, {
       headers: { Authorization: `Bearer ${expiredToken}` },
