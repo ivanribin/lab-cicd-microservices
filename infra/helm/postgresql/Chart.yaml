@@ -1,0 +1,6 @@
+apiVersion: v2
+name: postgresql
+description: Minimal single-instance PostgreSQL for the lab environment
+type: application
+version: 1.0.0
+appVersion: "16"

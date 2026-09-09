@@ -1,0 +1,296 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  lint:
+    name: Lint (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, orders-service]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+
+      - run: npm ci
+        working-directory: ${{ matrix.service }}
+
+      - run: npm run lint
+        working-directory: ${{ matrix.service }}
+
+  unit:
+    name: Unit tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, orders-service]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+
+      - run: npm ci
+        working-directory: ${{ matrix.service }}
+
+      - run: npm test
+        working-directory: ${{ matrix.service }}
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: ephemeral-ci-database-password
+          POSTGRES_DB: lab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lab -d lab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: orders-service/package-lock.json
+
+      - run: npm ci
+        working-directory: orders-service
+
+      - name: Apply migrations against a real PostgreSQL
+        working-directory: orders-service
+        env:
+          POSTGRES_PASSWORD: ephemeral-ci-database-password
+        run: |
+          export DATABASE_URL="postgres://lab:${POSTGRES_PASSWORD}@localhost:5432/lab"
+          npm run migrate
+
+      - name: Run integration tests
+        working-directory: orders-service
+        env:
+          POSTGRES_PASSWORD: ephemeral-ci-database-password
+        run: |
+          export DATABASE_URL="postgres://lab:${POSTGRES_PASSWORD}@localhost:5432/lab"
+          npm run test:integration
+
+  sast:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+
+  sca:
+    name: SCA (npm audit + Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Audit production dependencies
+        run: |
+          for service in auth-service orders-service; do
+            echo "::group::npm audit ${service}"
+            (cd "${service}" && npm audit --audit-level=high --omit=dev)
+            echo "::endgroup::"
+          done
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Scan the full git history
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.21.2 \
+            detect --source=/repo --config=/repo/.gitleaks.toml --redact --verbose
+
+  policy:
+    name: Policy checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Forbid latest image tags in infrastructure
+        run: |
+          if [ ! -d infra ]; then
+            echo "infra/ does not exist yet, skipping"
+            exit 0
+          fi
+
+          if grep -rn --include='*.yaml' --include='*.yml' -E ':[[:space:]]*latest|:latest' infra/; then
+            echo "::error::latest image tags are forbidden in infra/"
+            exit 1
+          fi
+
+          echo "no latest tags found in infra/"
+
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.21.4
+
+      - name: Lint every chart
+        run: |
+          for chart in infra/helm/microservice infra/helm/postgresql infra/helm/monitoring; do
+            echo "::group::helm lint ${chart}"
+            if [ "$chart" = "infra/helm/microservice" ]; then
+              helm lint "$chart" --values infra/helm/values/auth-service.yaml \
+                --set colors.blue.tag=sha-0000000 --set migrations.tag=sha-0000000
+            else
+              helm lint "$chart"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Render manifests for every service
+        run: |
+          for service in auth-service orders-service web-client; do
+            echo "::group::helm template ${service}"
+            helm template "$service" infra/helm/microservice \
+              --values "infra/helm/values/${service}.yaml" \
+              --set colors.blue.tag=sha-0000000 \
+              --set migrations.tag=sha-0000000
+            echo "::endgroup::"
+          done
+
+          helm template postgresql infra/helm/postgresql > /dev/null
+          helm template monitoring infra/helm/monitoring > /dev/null
+
+      - name: The chart must reject a latest tag
+        run: |
+          if helm template auth-service infra/helm/microservice \
+            --values infra/helm/values/auth-service.yaml \
+            --set colors.blue.tag=latest --set migrations.tag=latest >/dev/null 2>&1; then
+            echo "::error::the chart rendered a 'latest' tag, the guard is broken"
+            exit 1
+          fi
+          echo "confirmed: the chart refuses to render a 'latest' tag"
+
+  build:
+    name: Build and push (${{ matrix.service }})
+    needs: [lint, unit, integration, sast, sca, secrets, policy, helm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, orders-service, web-client]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve image reference
+        id: image
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/${owner}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image into the local daemon
+        uses: docker/build-push-action@v7
+        with:
+          context: ./${{ matrix.service }}
+          load: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Scan the image before it reaches the registry
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the scanned image
+        if: github.event_name == 'push'
+        run: docker push ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+
+  ci-summary:
+    name: CI summary
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report the published image tag
+        run: |
+          echo "### CI passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image tag: \`sha-$(echo "${{ github.sha }}" | cut -c1-7)\`" >> "$GITHUB_STEP_SUMMARY"

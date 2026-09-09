@@ -1,0 +1,17 @@
+# Suppressed findings, by fingerprint: <commit>:<file>:<rule>:<line>
+#
+# gitleaks scans the whole git history, so a finding stays reported even after
+# the offending line is gone from the working tree. These three are test-only
+# signing keys that were named JWT_SECRET in commit 9f9f66d; the constant has
+# since been renamed to TEST_SIGNING_KEY, but the old commit still contains it.
+#
+# They are safe to suppress because the values never protected anything: both
+# are literals used to sign tokens inside the test process itself, and neither
+# is accepted by any deployed service, which reads its key from lab-secrets.
+#
+# A real leaked credential would NOT be handled this way. The correct response
+# there is to revoke the credential first, then rewrite history.
+
+9f9f66dc468440a9982297bc01f2e32445fab5b6:auth-service/test/app.test.js:generic-jwt-secret:6
+9f9f66dc468440a9982297bc01f2e32445fab5b6:orders-service/test/app.test.js:generic-jwt-secret:6
+9f9f66dc468440a9982297bc01f2e32445fab5b6:orders-service/test/integration.test.js:generic-jwt-secret:8

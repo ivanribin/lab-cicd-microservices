@@ -1,0 +1,24 @@
+nameOverride: web-client
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/ivanribin/web-client
+
+service:
+  type: NodePort
+  port: 8080
+  targetPort: 8080
+  nodePort: 30080
+
+probes:
+  liveness: /health
+  readiness: /health
+
+metrics:
+  enabled: false
+
+# nginx needs a writable temp area even though the root filesystem stays read-only
+writablePaths:
+  - /tmp
+  - /var/cache/nginx

@@ -5,18 +5,18 @@ useDefault = true
 
 [[rules]]
 id = "generic-jwt-secret"
-description = "Hardcoded JWT secret"
-regex = '''(?i)jwt[_-]?secret\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+description = "Hardcoded JWT secret (literal values only, not variable references)"
+regex = '''(?i)jwt[_-]?secret\s*[:=]\s*['"][^'"\s${}]{8,}['"]'''
 tags = ["secret", "jwt"]
 
 [[rules]]
 id = "postgres-connection-string"
-description = "PostgreSQL connection string with inline password"
-regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@'''
+description = "PostgreSQL connection string with a literal inline password"
+regex = '''postgres(ql)?://[^:\s]+:[^@\s{}$]+@'''
 tags = ["secret", "database"]
 
 [allowlist]
-description = "Placeholders and documentation samples"
+description = "Placeholders, documentation samples and ephemeral CI-only values"
 paths = [
   '''\.env\.example$''',
   '''README\.md$''',
@@ -26,4 +26,5 @@ regexes = [
   '''replace-me-with-[a-z-]+''',
   '''\$\{[A-Z_]+\}''',
   '''secretKeyRef''',
+  '''ephemeral-ci-database-password''',
 ]

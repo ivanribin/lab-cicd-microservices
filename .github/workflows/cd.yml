@@ -1,0 +1,241 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy, for example sha-abc1234
+        required: true
+      fail_mode:
+        description: Deploy orders-service with FAIL_MODE=1 to demonstrate the automatic rollback
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Kubernetes (blue-green)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: read
+      packages: read
+    env:
+      NAMESPACE: lab
+      CLUSTER_NAME: lab
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the image tag to deploy
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.image_tag }}"
+          else
+            tag="sha-$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)"
+          fi
+
+          if [ -z "$tag" ] || [ "$tag" = "latest" ]; then
+            echo "::error::refusing to deploy an empty or 'latest' tag"
+            exit 1
+          fi
+
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/${owner}" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag ${tag}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.21.4
+
+      - name: Create the kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: lab
+          config: infra/kind-config.yaml
+
+      - name: Apply namespace and least-privilege RBAC
+        run: |
+          kubectl apply -f infra/k8s/namespace.yaml
+          kubectl apply -f infra/k8s/rbac.yaml
+
+      - name: Create application secrets from GitHub Secrets
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          for name in JWT_SECRET POSTGRES_PASSWORD DEMO_PASSWORD GRAFANA_ADMIN_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::repository secret ${name} is not set"
+              exit 1
+            fi
+          done
+
+          kubectl -n "$NAMESPACE" create secret generic lab-secrets \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --from-literal=DEMO_USER=demo \
+            --from-literal=DEMO_PASSWORD="$DEMO_PASSWORD" \
+            --from-literal=GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+            --from-literal=DATABASE_URL="postgres://lab:${POSTGRES_PASSWORD}@postgresql:5432/lab" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Build a restricted kubeconfig for the CI/CD ServiceAccount
+        run: |
+          server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          kubectl -n "$NAMESPACE" get secret cicd-deployer-token -o jsonpath='{.data.ca\.crt}' \
+            | base64 -d > /tmp/ca.crt
+          token="$(kubectl -n "$NAMESPACE" get secret cicd-deployer-token -o jsonpath='{.data.token}' | base64 -d)"
+
+          kubectl config --kubeconfig=/tmp/deployer.kubeconfig set-cluster lab \
+            --server="$server" --certificate-authority=/tmp/ca.crt --embed-certs=true
+          kubectl config --kubeconfig=/tmp/deployer.kubeconfig set-credentials cicd-deployer \
+            --token="$token"
+          kubectl config --kubeconfig=/tmp/deployer.kubeconfig set-context lab \
+            --cluster=lab --user=cicd-deployer --namespace="$NAMESPACE"
+          kubectl config --kubeconfig=/tmp/deployer.kubeconfig use-context lab
+
+          echo "KUBECONFIG=/tmp/deployer.kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Prove the deployer has no cluster-wide rights
+        run: |
+          echo "Permissions of the CI/CD ServiceAccount:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "create deployment in lab: $(kubectl auth can-i create deployments -n lab)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "list nodes (cluster-wide): $(kubectl auth can-i list nodes)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "create deployment in kube-system: $(kubectl auth can-i create deployments -n kube-system)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$(kubectl auth can-i list nodes)" != "no" ]; then
+            echo "::error::the deployer must not have cluster-wide access"
+            exit 1
+          fi
+
+      - name: Pull the scanned images and load them into kind
+        env:
+          REGISTRY: ${{ steps.target.outputs.registry }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+          for service in auth-service orders-service web-client; do
+            docker pull "${REGISTRY}/${service}:${TAG}"
+            kind load docker-image "${REGISTRY}/${service}:${TAG}" --name "$CLUSTER_NAME"
+          done
+
+      - name: Install PostgreSQL
+        run: |
+          helm upgrade --install postgresql infra/helm/postgresql \
+            --namespace "$NAMESPACE" --wait --timeout 5m
+          kubectl -n "$NAMESPACE" rollout status statefulset/postgresql --timeout=5m
+
+      - name: Install Prometheus and Grafana
+        run: |
+          helm upgrade --install monitoring infra/helm/monitoring \
+            --namespace "$NAMESPACE" --wait --timeout 5m
+
+      - name: Blue-green deploy auth-service
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: bash infra/scripts/deploy.sh auth-service "$TAG"
+
+      - name: Blue-green deploy orders-service
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: bash infra/scripts/deploy.sh orders-service "$TAG"
+
+      - name: Blue-green deploy web-client
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: bash infra/scripts/deploy.sh web-client "$TAG"
+
+      - name: Break orders-service on purpose and prove the rollback works
+        if: github.event_name == 'workflow_dispatch' && inputs.fail_mode
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: |
+          before="$(kubectl -n "$NAMESPACE" get svc orders-service -o jsonpath='{.spec.selector.color}')"
+          echo "colour serving traffic before the broken release: ${before}"
+
+          kubectl -n "$NAMESPACE" patch secret lab-secrets \
+            --type merge -p '{"stringData":{"FAIL_MODE":"1"}}'
+
+          if bash infra/scripts/deploy.sh orders-service "$TAG"; then
+            echo "::error::the broken release was accepted, rollback did not trigger"
+            exit 1
+          fi
+
+          after="$(kubectl -n "$NAMESPACE" get svc orders-service -o jsonpath='{.spec.selector.color}')"
+          echo "colour serving traffic after the failed release: ${after}"
+
+          if [ "$before" != "$after" ]; then
+            echo "::error::traffic moved to a broken version"
+            exit 1
+          fi
+
+          kubectl -n "$NAMESPACE" patch secret lab-secrets \
+            --type merge -p '{"stringData":{"FAIL_MODE":"0"}}'
+
+          echo "Rollback verified: traffic stayed on ${before}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report the deployed state
+        run: |
+          {
+            echo "### Deployed state"
+            echo ""
+            echo "| Service | Active colour | Image tag |"
+            echo "|---|---|---|"
+            for service in auth-service orders-service web-client; do
+              color="$(kubectl -n "$NAMESPACE" get svc "$service" -o jsonpath='{.spec.selector.color}')"
+              image="$(kubectl -n "$NAMESPACE" get deploy "${service}-${color}" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+              echo "| ${service} | ${color} | ${image##*:} |"
+            done
+            echo ""
+            echo "Applied migrations:"
+            echo '```'
+            kubectl -n "$NAMESPACE" logs job/orders-service-migrate 2>/dev/null || echo "migration job log is no longer available"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          kubectl -n "$NAMESPACE" get all -o wide > diagnostics/resources.txt 2>&1 || true
+          kubectl -n "$NAMESPACE" describe pods > diagnostics/describe-pods.txt 2>&1 || true
+          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp > diagnostics/events.txt 2>&1 || true
+
+          for pod in $(kubectl -n "$NAMESPACE" get pods -o name 2>/dev/null); do
+            name="${pod#pod/}"
+            kubectl -n "$NAMESPACE" logs "$name" --all-containers --tail=500 \
+              > "diagnostics/logs-${name}.txt" 2>&1 || true
+          done
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cluster-diagnostics
+          path: diagnostics/
+          retention-days: 7

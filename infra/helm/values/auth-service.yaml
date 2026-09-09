@@ -1,0 +1,16 @@
+nameOverride: auth-service
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ivanribin/auth-service
+
+service:
+  port: 3000
+  targetPort: 3000
+
+envFromSecret: lab-secrets
+
+env:
+  - name: PORT
+    value: "3000"

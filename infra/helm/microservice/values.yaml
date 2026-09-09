@@ -1,0 +1,67 @@
+nameOverride: ""
+
+replicaCount: 2
+
+# Which colour the main Service currently points at. The pipeline flips it
+# only after end-to-end tests pass against the preview Service.
+activeColor: blue
+
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+
+# Each colour carries its own tag on purpose: during a rollout the old colour
+# must keep serving the previous image while the new one is being verified.
+colors:
+  blue:
+    enabled: true
+    tag: ""
+  green:
+    enabled: false
+    tag: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+  nodePort: null
+
+probes:
+  liveness: /health
+  readiness: /ready
+  initialDelaySeconds: 3
+  periodSeconds: 5
+  failureThreshold: 3
+
+metrics:
+  enabled: true
+  path: /metrics
+
+migrations:
+  enabled: false
+  tag: ""
+  command: []
+
+env: []
+
+envFromSecret: ""
+
+writablePaths: []
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
