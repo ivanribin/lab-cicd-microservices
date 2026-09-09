@@ -185,6 +185,33 @@ jobs:
 
           echo "no latest tags found in infra/"
 
+      - name: Require a numeric USER in every Dockerfile
+        run: |
+          # The charts run pods with runAsNonRoot, and the kubelet must prove the
+          # user is not root before starting the container. It cannot resolve a
+          # name like "node" into a uid, so a named USER fails at deploy time
+          # while passing every build and template check.
+          failed=0
+
+          for dockerfile in */Dockerfile; do
+            user="$(grep -E '^USER ' "$dockerfile" | tail -1 | awk '{ print $2 }')"
+
+            if [ -z "$user" ]; then
+              echo "::error file=${dockerfile}::no USER instruction, the image would run as root"
+              failed=1
+            elif ! echo "$user" | grep -qE '^[0-9]+$'; then
+              echo "::error file=${dockerfile}::USER must be a numeric uid, found '${user}'"
+              failed=1
+            elif [ "$user" = "0" ]; then
+              echo "::error file=${dockerfile}::USER 0 is root"
+              failed=1
+            else
+              echo "${dockerfile}: runs as uid ${user}"
+            fi
+          done
+
+          exit "$failed"
+
   helm:
     name: Helm charts
     runs-on: ubuntu-latest

@@ -56,8 +56,13 @@ resources:
     cpu: 250m
     memory: 256Mi
 
+# runAsUser must be numeric: the kubelet verifies "not root" before the container
+# starts and cannot resolve user names baked into the image.
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
