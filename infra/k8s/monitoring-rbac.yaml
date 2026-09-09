@@ -1,0 +1,37 @@
+# RBAC for Prometheus service discovery.
+#
+# These objects deliberately live outside the monitoring Helm chart. The chart is
+# installed by the CI/CD ServiceAccount, and that account has no rights over
+# ServiceAccounts, Roles or RoleBindings on purpose: an account able to create
+# roles can grant itself any privilege, which would defeat the least-privilege
+# setup entirely. So a cluster administrator applies this file once, and the
+# chart only references the ServiceAccount by name.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: lab
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus
+  namespace: lab
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus
+  namespace: lab
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: lab
+roleRef:
+  kind: Role
+  name: prometheus
+  apiGroup: rbac.authorization.k8s.io

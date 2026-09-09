@@ -70,9 +70,13 @@ jobs:
           config: infra/kind-config.yaml
 
       - name: Apply namespace and least-privilege RBAC
+        # Runs under the cluster-admin context on purpose: RBAC objects are the
+        # administrator's responsibility, not the deployer's. The deployer is
+        # switched in a later step and never gets rights to grant itself more.
         run: |
           kubectl apply -f infra/k8s/namespace.yaml
           kubectl apply -f infra/k8s/rbac.yaml
+          kubectl apply -f infra/k8s/monitoring-rbac.yaml
 
       - name: Create application secrets from GitHub Secrets
         env:
@@ -168,6 +172,14 @@ jobs:
           TAG: ${{ steps.target.outputs.tag }}
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
         run: bash infra/scripts/deploy.sh web-client "$TAG"
+
+      - name: Run e2e against the live services
+        # On a first-ever release each service comes up as blue with no preview
+        # colour, so deploy.sh has nothing to verify against. This step checks
+        # the whole system once every service is in place.
+        env:
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: bash infra/scripts/run-e2e.sh
 
       - name: Break orders-service on purpose and prove the rollback works
         if: github.event_name == 'workflow_dispatch' && inputs.fail_mode
