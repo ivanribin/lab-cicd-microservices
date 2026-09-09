@@ -11,6 +11,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY migrations ./migrations
-USER node
+# Numeric UID on purpose: with runAsNonRoot the kubelet must verify the user is
+# not root before the container starts, and it cannot resolve names like "node".
+USER 1000
 EXPOSE 3000
 CMD ["node", "src/server.js"]

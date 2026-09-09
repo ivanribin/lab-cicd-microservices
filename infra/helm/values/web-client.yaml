@@ -22,3 +22,10 @@ metrics:
 writablePaths:
   - /tmp
   - /var/cache/nginx
+
+# nginx-unprivileged runs as uid 101, not 1000 like the Node images
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
