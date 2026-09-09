@@ -16,7 +16,7 @@ regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@'''
 tags = ["secret", "database"]
 
 [allowlist]
-description = "Placeholders and documentation samples"
+description = "Placeholders, documentation samples and ephemeral CI-only values"
 paths = [
   '''\.env\.example$''',
   '''README\.md$''',
@@ -26,4 +26,6 @@ regexes = [
   '''replace-me-with-[a-z-]+''',
   '''\$\{[A-Z_]+\}''',
   '''secretKeyRef''',
+  '''ephemeral-ci-database-password''',
+  '''(unit|integration)-test-secret''',
 ]
