@@ -44,6 +44,7 @@ kubectl config use-context "kind-${CLUSTER_NAME}"
 log "applying namespace and RBAC"
 kubectl apply -f "${REPO_ROOT}/infra/k8s/namespace.yaml"
 kubectl apply -f "${REPO_ROOT}/infra/k8s/rbac.yaml"
+kubectl apply -f "${REPO_ROOT}/infra/k8s/monitoring-rbac.yaml"
 
 log "creating lab-secrets"
 kubectl -n "$NAMESPACE" create secret generic lab-secrets \
