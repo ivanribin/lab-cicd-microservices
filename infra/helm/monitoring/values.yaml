@@ -1,0 +1,30 @@
+namespace: lab
+
+prometheus:
+  image:
+    repository: prom/prometheus
+    tag: "v3.1.0"
+  scrapeInterval: 10s
+  nodePort: 30900
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+grafana:
+  image:
+    repository: grafana/grafana
+    tag: "11.4.0"
+  nodePort: 30300
+  adminSecret: lab-secrets
+  adminPasswordKey: GRAFANA_ADMIN_PASSWORD
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

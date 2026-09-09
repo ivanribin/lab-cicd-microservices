@@ -185,9 +185,56 @@ jobs:
 
           echo "no latest tags found in infra/"
 
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.21.4
+
+      - name: Lint every chart
+        run: |
+          for chart in infra/helm/microservice infra/helm/postgresql infra/helm/monitoring; do
+            echo "::group::helm lint ${chart}"
+            if [ "$chart" = "infra/helm/microservice" ]; then
+              helm lint "$chart" --values infra/helm/values/auth-service.yaml \
+                --set colors.blue.tag=sha-0000000 --set migrations.tag=sha-0000000
+            else
+              helm lint "$chart"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Render manifests for every service
+        run: |
+          for service in auth-service orders-service web-client; do
+            echo "::group::helm template ${service}"
+            helm template "$service" infra/helm/microservice \
+              --values "infra/helm/values/${service}.yaml" \
+              --set colors.blue.tag=sha-0000000 \
+              --set migrations.tag=sha-0000000
+            echo "::endgroup::"
+          done
+
+          helm template postgresql infra/helm/postgresql > /dev/null
+          helm template monitoring infra/helm/monitoring > /dev/null
+
+      - name: The chart must reject a latest tag
+        run: |
+          if helm template auth-service infra/helm/microservice \
+            --values infra/helm/values/auth-service.yaml \
+            --set colors.blue.tag=latest --set migrations.tag=latest >/dev/null 2>&1; then
+            echo "::error::the chart rendered a 'latest' tag, the guard is broken"
+            exit 1
+          fi
+          echo "confirmed: the chart refuses to render a 'latest' tag"
+
   build:
     name: Build and push (${{ matrix.service }})
-    needs: [lint, unit, integration, sast, sca, secrets, policy]
+    needs: [lint, unit, integration, sast, sca, secrets, policy, helm]
     runs-on: ubuntu-latest
     permissions:
       contents: read

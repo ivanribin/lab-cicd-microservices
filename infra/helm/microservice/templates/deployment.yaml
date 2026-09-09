@@ -1,0 +1,81 @@
+{{- $name := include "microservice.name" . -}}
+{{- range $color, $colorValues := .Values.colors }}
+{{- if $colorValues.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-{{ $color }}
+  labels:
+    app: {{ $name }}
+    color: {{ $color }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+      color: {{ $color }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        color: {{ $color }}
+      {{- if $.Values.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $.Values.service.targetPort | quote }}
+        prometheus.io/path: {{ $.Values.metrics.path | quote }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $.Values.image.repository }}:{{ include "microservice.imageTag" $colorValues.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $.Values.service.targetPort }}
+          {{- if $.Values.env }}
+          env:
+            {{- toYaml $.Values.env | nindent 12 }}
+          {{- end }}
+          {{- if $.Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ $.Values.envFromSecret }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ $.Values.probes.liveness }}
+              port: http
+            initialDelaySeconds: {{ $.Values.probes.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.probes.periodSeconds }}
+            failureThreshold: {{ $.Values.probes.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ $.Values.probes.readiness }}
+              port: http
+            initialDelaySeconds: {{ $.Values.probes.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.probes.periodSeconds }}
+            failureThreshold: {{ $.Values.probes.failureThreshold }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          {{- if $.Values.writablePaths }}
+          volumeMounts:
+            {{- range $index, $path := $.Values.writablePaths }}
+            - name: writable-{{ $index }}
+              mountPath: {{ $path }}
+            {{- end }}
+          {{- end }}
+      {{- if $.Values.writablePaths }}
+      volumes:
+        {{- range $index, $path := $.Values.writablePaths }}
+        - name: writable-{{ $index }}
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+---
+{{- end }}
+{{- end }}

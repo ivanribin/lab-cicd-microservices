@@ -1,0 +1,6 @@
+apiVersion: v2
+name: microservice
+description: Blue-green deployable service used by every application service in this lab
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
