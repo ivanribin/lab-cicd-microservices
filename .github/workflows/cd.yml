@@ -181,6 +181,36 @@ jobs:
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
         run: bash infra/scripts/run-e2e.sh
 
+      - name: Demonstrate a blue-green switch
+        # The kind cluster is created from scratch every run, so the steps above
+        # are always a first release and every service comes up blue. A switch
+        # needs a second release against a cluster that already serves traffic,
+        # which is exactly what this step performs.
+        if: github.event_name == 'workflow_dispatch' && !inputs.fail_mode
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+        run: |
+          before="$(kubectl -n "$NAMESPACE" get svc orders-service -o jsonpath='{.spec.selector.color}')"
+          echo "colour serving traffic before the switch: ${before}"
+
+          bash infra/scripts/deploy.sh orders-service "$TAG"
+
+          after="$(kubectl -n "$NAMESPACE" get svc orders-service -o jsonpath='{.spec.selector.color}')"
+          echo "colour serving traffic after the switch: ${after}"
+
+          if [ "$before" = "$after" ]; then
+            echo "::error::traffic did not move, the blue-green switch did not happen"
+            exit 1
+          fi
+
+          {
+            echo "### Blue-green switch"
+            echo ""
+            echo "Traffic moved from \`${before}\` to \`${after}\` on orders-service."
+            echo "The new colour served no user traffic until e2e passed against its preview Service."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Break orders-service on purpose and prove the rollback works
         if: github.event_name == 'workflow_dispatch' && inputs.fail_mode
         env:
