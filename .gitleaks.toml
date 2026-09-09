@@ -1,0 +1,29 @@
+title = "lab-cicd-microservices gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-jwt-secret"
+description = "Hardcoded JWT secret"
+regex = '''(?i)jwt[_-]?secret\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+tags = ["secret", "jwt"]
+
+[[rules]]
+id = "postgres-connection-string"
+description = "PostgreSQL connection string with inline password"
+regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@'''
+tags = ["secret", "database"]
+
+[allowlist]
+description = "Placeholders and documentation samples"
+paths = [
+  '''\.env\.example$''',
+  '''README\.md$''',
+  '''docs/.*\.md$''',
+]
+regexes = [
+  '''replace-me-with-[a-z-]+''',
+  '''\$\{[A-Z_]+\}''',
+  '''secretKeyRef''',
+]

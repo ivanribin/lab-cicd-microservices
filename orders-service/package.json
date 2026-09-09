@@ -1,0 +1,27 @@
+{
+  "name": "orders-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/migrate.js",
+    "test": "node --test test/app.test.js",
+    "test:integration": "node --test test/integration.test.js",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@prometheus-io/client": "^0.16.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0"
+  }
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orders demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    fieldset { border: 1px solid #ccc; border-radius: 6px; margin-bottom: 20px; }
+    label { display: block; margin: 8px 0 4px; }
+    input { padding: 6px; width: 220px; }
+    button { padding: 8px 14px; margin-top: 12px; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+    #status { margin-top: 12px; min-height: 20px; }
+    .error { color: #b00020; }
+    .ok { color: #0a7d28; }
+  </style>
+</head>
+<body>
+  <h1>Orders demo</h1>
+
+  <fieldset>
+    <legend>Вход</legend>
+    <label for="username">Пользователь</label>
+    <input id="username" value="demo" autocomplete="username">
+    <label for="password">Пароль</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <button id="login">Войти</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Заказы</legend>
+    <label for="item">Товар</label>
+    <input id="item" value="widget">
+    <label for="quantity">Количество</label>
+    <input id="quantity" type="number" value="1" min="1">
+    <button id="create">Создать заказ</button>
+    <button id="refresh">Обновить список</button>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Товар</th><th>Кол-во</th><th>Статус</th><th>Создан</th></tr>
+      </thead>
+      <tbody id="orders"></tbody>
+    </table>
+  </fieldset>
+
+  <div id="status"></div>
+
+  <script>
+    let token = null;
+    const statusBox = document.getElementById('status');
+
+    function setStatus(message, isError) {
+      statusBox.textContent = message;
+      statusBox.className = isError ? 'error' : 'ok';
+    }
+
+    async function login() {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+        }),
+      });
+
+      if (!response.ok) {
+        token = null;
+        setStatus('Ошибка входа: ' + response.status, true);
+        return;
+      }
+
+      token = (await response.json()).token;
+      setStatus('Вход выполнен', false);
+      await loadOrders();
+    }
+
+    async function loadOrders() {
+      if (!token) {
+        setStatus('Сначала выполните вход', true);
+        return;
+      }
+
+      const response = await fetch('/api/orders', {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+
+      if (!response.ok) {
+        setStatus('Не удалось получить заказы: ' + response.status, true);
+        return;
+      }
+
+      const { orders } = await response.json();
+      document.getElementById('orders').innerHTML = orders
+        .map((order) => `<tr><td>${order.id}</td><td>${order.item}</td><td>${order.quantity}</td><td>${order.status}</td><td>${new Date(order.created_at).toLocaleString()}</td></tr>`)
+        .join('');
+      setStatus('Загружено заказов: ' + orders.length, false);
+    }
+
+    async function createOrder() {
+      if (!token) {
+        setStatus('Сначала выполните вход', true);
+        return;
+      }
+
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({
+          item: document.getElementById('item').value,
+          quantity: Number(document.getElementById('quantity').value),
+        }),
+      });
+
+      if (!response.ok) {
+        setStatus('Не удалось создать заказ: ' + response.status, true);
+        return;
+      }
+
+      await loadOrders();
+    }
+
+    document.getElementById('login').addEventListener('click', login);
+    document.getElementById('create').addEventListener('click', createOrder);
+    document.getElementById('refresh').addEventListener('click', loadOrders);
+  </script>
+</body>
+</html>
