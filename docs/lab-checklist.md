@@ -15,15 +15,18 @@
 | E4: RBAC реально ограничен | шаг `Prove the deployer has no cluster-wide rights` в summary | там же |
 | C5: миграции применяются хуком | блок `Applied migrations` в summary | там же |
 | D1: Prometheus и Grafana развёрнуты | шаг `Install Prometheus and Grafana` | там же |
+| C2: переключение blue-green | e2e прошли против `orders-service-preview`, затем трафик перешёл `blue` в `green` | [34378646260](https://github.com/ivanribin/lab-cicd-microservices/actions/runs/34378646260) |
+| C4 уровень 2 + D4: откат по падению e2e | e2e упали против `green`, откат вернул `blue`, цвет до и после совпал | [34580277531](https://github.com/ivanribin/lab-cicd-microservices/actions/runs/34580277531) |
 
 ## Осталось получить
 
 | Пункт | Что сделать | Статус |
 |---|---|---|
-| C2: переключение blue-green | смержить `42a39b8` в `main`, запустить CD вручную без `fail_mode` | ждёт мержа |
-| C4 уровень 2 + D4: откат по падению e2e | запустить CD вручную с `fail_mode` | не запускался |
-| Скриншот приложения | локально `bash infra/scripts/kind-up.sh`, http://localhost:8080 | нужен Docker |
-| Скриншот Grafana | там же, http://localhost:3000 | нужен Docker |
+| D1: живой дашборд Grafana | локально `bash infra/scripts/kind-up.sh`, http://localhost:3000 | нужен Docker |
+| Скриншот приложения | там же, http://localhost:8080 | нужен Docker, необязательный |
+
+Все подпункты от A1 до E4 подтверждены прогонами. Осталась только живая Grafana:
+её развёртывание видно в логах CD, но дашборд с данными нужно снять из кластера.
 
 ## Про сроки: что успеть, а что не убежит
 

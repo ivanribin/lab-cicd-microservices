@@ -164,14 +164,28 @@ Summary внизу страницы.
 В кадре: строка `e2e PASSED` и предшествующие шаги сценария - логин, создание
 заказа, чтение.
 
-### `d4-e2e-rollback.png` - rollback при падении e2e (прогон 3)
+### `d4-e2e-rollback.png` - rollback при падении e2e (есть)
 
-Где: summary красного прогона CD с `fail_mode`.
+Где: [прогон 34580277531](https://github.com/ivanribin/lab-cicd-microservices/actions/runs/34580277531),
+шаг `Break orders-service on purpose and prove the rollback works`.
 
-В кадре: строки `colour serving traffic before the broken release` и `after` с
-**одинаковым** цветом, плюс красный статус прогона.
+В кадре, сверху вниз:
 
-Красный прогон здесь - правильный результат: трафик не ушёл на сломанную версию.
+```
+colour serving traffic before the broken release: blue
+green is ready but receives no user traffic yet
+e2e FAILED: an order can be created, the created order is listed
+e2e FAILED against green, user traffic never left blue
+[rollback] done, Service now selects colour: blue
+colour serving traffic after the failed release: blue
+```
+
+Главное в кадре - одинаковый цвет `blue` в первой и последней строке.
+
+Прогон при этом **зелёный**, и это не противоречие: шаг работает как проверка
+отката. Он ожидает провала выката, перехватывает его и убеждается, что трафик
+остался на рабочей версии. Красным прогон стал бы в обратном случае - если бы
+сломанный релиз приняли.
 
 ---
 
